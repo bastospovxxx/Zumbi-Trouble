@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zombie Trouble - Cidade Abandonada</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0d0f12;
+      font-family: 'Courier New', Courier, monospace;
+      color: #fff;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+    }
+    /* HUD Estilizada */
+    #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 15px;
+    }
+    .stats-panel {
+      background: rgba(15, 18, 24, 0.85);
+      border: 3px solid #3a414d;
+      padding: 10px 15px;
+      border-radius: 8px;
+      width: 260px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+    .stat-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .stat-row:last-child { margin-bottom: 0; }
+    .stat-icon { width: 24px; text-align: center; margin-right: 8px; }
+    .bar-bg {
+      flex: 1;
+      height: 12px;
+      background: #1a1e24;
+      border: 1px solid #444;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .bar-fill { height: 100%; transition: width 0.15s ease; }
+    .hp-fill { background: #e74c3c; }
+    .hunger-fill { background: #e67e22; }
+    .thirst-fill { background: #3498db; }
+    .armor-fill { background: #9b59b6; }
+
+    /* Hotbar */
+    .hotbar-container {
+      align-self: center;
+      background: rgba(15, 18, 24, 0.9);
+      border: 3px solid #3a414d;
+      border-radius: 10px;
+      padding: 6px;
+      display: flex;
+      gap: 6px;
+      box-shadow: 0 6px 15px rgba(0,0,0,0.7);
+    }
+    .hotbar-slot {
+      width: 50px;
+      height: 50px;
+      background: #1a1e24;
+      border: 2px solid #2c323d;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      font-size: 11px;
+    }
+    .hotbar-slot.active {
+      border-color: #f1c40f;
+      background: #282e38;
+      box-shadow: 0 0 8px rgba(241, 196, 15, 0.5);
+    }
+    .slot-key {
+      position: absolute;
+      top: 2px;
+      left: 4px;
+      font-size: 10px;
+      color: #888;
+    }
+    .slot-icon { font-size: 20px; }
+    .slot-ammo {
+      position: absolute;
+      bottom: 2px;
+      right: 4px;
+      font-size: 10px;
+      color: #aaa;
+    }
+
+    /* Info overlays */
+    #ammo-display {
+      position: absolute;
+      bottom: 85px;
+      right: 20px;
+      background: rgba(15, 18, 24, 0.85);
+      border: 2px solid #3a414d;
+      padding: 8px 15px;
+      border-radius: 6px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #f1c40f;
+    }
+    #damage-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+      box-shadow: inset 0 0 0px rgba(231, 76, 60, 0);
+      transition: box-shadow 0.1s ease;
+    }
+    #damage-overlay.hit {
+      box-shadow: inset 0 0 80px rgba(231, 76, 60, 0.6);
+    }
+  </style>
+
+  <!-- Firebase Web SDK (v9 Modulo via CDN) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+
+    // Configuração do Firebase (Substitua pelos seus dados reais se for publicar online)
+    const firebaseConfig = {
+      apiKey: "AIzaSyYOUR_API_KEY_HERE",
+      authDomain: "zombie-trouble.firebaseapp.com",
+      databaseURL: "https://zombie-trouble-default-rtdb.firebaseio.com",
+      projectId: "zombie-trouble",
+      storageBucket: "zombie-trouble.appspot.com",
+      messagingSenderId: "00000000000",
+      appId: "1:00000000000:web:00000000000"
+    };
+
+    // Inicialização do Firebase
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
+
+    // Expor variáveis do Firebase pro escopo global do jogo
+    window.db = database;
+    window.dbRef = ref;
+    window.dbSet = set;
+    window.dbOnValue = onValue;
+    window.dbRemove = remove;
+  </script>
+</head>
+<body>
+
+  <div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    <div id="damage-overlay"></div>
+
+    <div id="hud">
+      <div class="stats-panel">
+        <div class="stat-row">
+          <span class="stat-icon">❤️</span>
+          <div class="bar-bg"><div id="hp-bar" class="bar-fill hp-fill" style="width: 100%;"></div></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-icon">🍗</span>
+          <div class="bar-bg"><div id="hunger-bar" class="bar-fill hunger-fill" style="width: 80%;"></div></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-icon">💧</span>
+          <div class="bar-bg"><div id="thirst-bar" class="bar-fill thirst-fill" style="width: 65%;"></div></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-icon">🛡️</span>
+          <div class="bar-bg"><div id="armor-bar" class="bar-fill armor-fill" style="width: 40%;"></div></div>
+        </div>
+      </div>
+
+      <div id="ammo-display">MUNIÇÃO: <span id="ammo-count">30/120</span></div>
+
+      <div class="hotbar-container" id="hotbar">
+        <!-- 9 slots gerados dinamicamente via JS -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- MOTOR DO JOGO ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Configuração de Grade e Mapa
+    const TILE_SIZE = 64;
+    const MAP_SIZE = 50; // Mapa 50x50 tiles
+    const MAP_PIXEL_SIZE = MAP_SIZE * TILE_SIZE;
+
+    // Teclas Pressionadas
+    const keys = {};
+    const mouse = { x: 0, y: 0, worldX: 0, worldY: 0, down: false };
+
+    window.addEventListener('keydown', e => {
+      keys[e.key.toLowerCase()] = true;
+      if (e.key >= '1' && e.key <= '9') {
+        player.activeSlot = parseInt(e.key) - 1;
+        updateHotbarUI();
+      }
+    });
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+    window.addEventListener('mousemove', e => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+    });
+    window.addEventListener('mousedown', e => {
+      if (e.button === 0) {
+        mouse.down = true;
+        player.attack();
+      }
+    });
+    window.addEventListener('mouseup', e => { if (e.button === 0) mouse.down = false; });
+
+    // --- GERADOR DE MAPA DA CIDADE ABANDONADA ---
+    const mapTiles = [];
+    const mapDecorations = [];
+    const buildings = [];
+
+    function generateCity() {
+      for (let x = 0; x < MAP_SIZE; x++) {
+        mapTiles[x] = [];
+        for (let y = 0; y < MAP_SIZE; y++) {
+          // Padrão de ruas e quarteirões
+          const isRoadX = (x % 10 === 0 || x % 10 === 1);
+          const isRoadY = (y % 10 === 0 || y % 10 === 1);
+
+          if (isRoadX || isRoadY) {
+            mapTiles[x][y] = { type: 'road', variant: Math.floor(Math.random() * 3) };
+            if (Math.random() < 0.05) {
+              mapDecorations.push({ x: x * TILE_SIZE + 32, y: y * TILE_SIZE + 32, type: 'car' });
+            } else if (Math.random() < 0.08) {
+              mapDecorations.push({ x: x * TILE_SIZE + 32, y: y * TILE_SIZE + 32, type: 'trash' });
+            }
+          } else if (x % 10 === 2 || x % 10 === 9 || y % 10 === 2 || y % 10 === 9) {
+            mapTiles[x][y] = { type: 'sidewalk', variant: Math.floor(Math.random() * 2) };
+            if (Math.random() < 0.03) {
+              mapDecorations.push({ x: x * TILE_SIZE + 32, y: y * TILE_SIZE + 32, type: 'post' });
+            }
+          } else {
+            mapTiles[x][y] = { type: 'dirt', variant: Math.floor(Math.random() * 3) };
+          }
+        }
+      }
+
+      // Criar Prédios/Lojas/Hospitais nos quarteirões
+      for (let bx = 3; bx < MAP_SIZE - 3; bx += 10) {
+        for (let by = 3; by < MAP_SIZE - 3; by += 10) {
+          const types = ['hospital', 'police', 'market', 'pharmacy', 'house'];
+          const bType = types[Math.floor(Math.random() * types.length)];
+          buildings.push({
+            x: bx * TILE_SIZE,
+            y: by * TILE_SIZE,
+            w: 6 * TILE_SIZE,
+            h: 6 * TILE_SIZE,
+            type: bType
+          });
+        }
+      }
+    }
+    generateCity();
+
+    // --- JOGADOR ---
+    const player = {
+      x: MAP_PIXEL_SIZE / 2,
+      y: MAP_PIXEL_SIZE / 2,
+      radius: 20,
+      speed: 3.5,
+      angle: 0,
+      hp: 100,
+      maxHp: 100,
+      hunger: 80,
+      thirst: 65,
+      armor: 40,
+      activeSlot: 0,
+      recoilOffset: 0,
+      handAnim: 0,
+      isAttacking: false,
+      inventory: [
+        { name: 'Espada', type: 'melee', icon: '🗡️', damage: 35, cooldown: 300 },
+        { name: 'Machado', type: 'melee', icon: '🪓', damage: 50, cooldown: 500 },
+        { name: 'Pistola', type: 'gun', icon: '🔫', damage: 25, ammo: 30, maxAmmo: 120, cooldown: 180 },
+        { name: 'Rifle', type: 'gun', icon: '💥', damage: 45, ammo: 90, maxAmmo: 180, cooldown: 100 },
+        { name: 'Medkit', type: 'heal', icon: '🩹', healAmount: 40, count: 3 },
+        null, null, null, null
+      ],
+      lastAttackTime: 0,
+
+      update() {
+        // Movimentação
+        let dx = 0, dy = 0;
+        if (keys['w'] || keys['arrowup']) dy -= 1;
+        if (keys['s'] || keys['arrowdown']) dy += 1;
+        if (keys['a'] || keys['arrowleft']) dx -= 1;
+        if (keys['d'] || keys['arrowright']) dx += 1;
+
+        if (dx !== 0 && dy !== 0) {
+          dx *= 0.7071;
+          dy *= 0.7071;
+        }
+
+        const nextX = this.x + dx * this.speed;
+        const nextY = this.y + dy * this.speed;
+
+        // Colisão simples com limites do mapa
+        if (nextX > 50 && nextX < MAP_PIXEL_SIZE - 50) this.x = nextX;
+        if (nextY > 50 && nextY < MAP_PIXEL_SIZE - 50) this.y = nextY;
+
+        // Ângulo para o cursor
+        this.angle = Math.atan2(mouse.worldY - this.y, mouse.worldX - this.x);
+
+        // Suavizar recuo da arma
+        if (this.recoilOffset > 0) this.recoilOffset *= 0.8;
+      },
+
+      attack() {
+        const item = this.inventory[this.activeSlot];
+        if (!item) return;
+
+        const now = Date.now();
+        if (now - this.lastAttackTime < item.cooldown) return;
+        this.lastAttackTime = now;
+
+        this.isAttacking = true;
+        setTimeout(() => this.isAttacking = false, 150);
+
+        if (item.type === 'gun') {
+          if (item.ammo > 0) {
+            item.ammo--;
+            this.recoilOffset = 12;
+            createMuzzleFlash(this.x, this.y, this.angle);
+            bullets.push(new Bullet(this.x, this.y, this.angle, item.damage));
+            notifyZombiesNoise(this.x, this.y, 400); // Zumbis escutam o tiro
+            updateHUD();
+          }
+        } else if (item.type === 'melee') {
+          this.handAnim = 1;
+          setTimeout(() => this.handAnim = 0, 200);
+          // Verificar acerto de zumbis próximos em arco
+          zombies.forEach(z => {
+            const dist = Math.hypot(z.x - this.x, z.y - this.y);
+            if (dist < 70) {
+              z.takeDamage(item.damage);
+              createBloodParticles(z.x, z.y);
+            }
+          });
+        } else if (item.type === 'heal') {
+          if (item.count > 0 && this.hp < this.maxHp) {
+            this.hp = Math.min(this.maxHp, this.hp + item.healAmount);
+            item.count--;
+            if (item.count <= 0) this.inventory[this.activeSlot] = null;
+            updateHUD();
+            updateHotbarUI();
+          }
+        }
+      }
+    };
+
+    // --- MUNIÇÃO & PROJÉTEIS ---
+    const bullets = [];
+    class Bullet {
+      constructor(x, y, angle, damage) {
+        this.x = x;
+        this.y = y;
+        this.vx = Math.cos(angle) * 16;
+        this.vy = Math.sin(angle) * 16;
+        this.damage = damage;
+        this.life = 40;
+      }
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+
+        // Colisão com Zumbis
+        for (let i = zombies.length - 1; i >= 0; i--) {
+          const z = zombies[i];
+          if (Math.hypot(z.x - this.x, z.y - this.y) < z.radius) {
+            z.takeDamage(this.damage);
+            createBloodParticles(this.x, this.y);
+            this.life = 0;
+            break;
+          }
+        }
+      }
+      draw() {
+        ctx.fillStyle = '#f39c12';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // --- ZUMBIS COM VARIACÃO VISUAL E DE TIPO ---
+    const zombies = [];
+    const ZOMBIE_TYPES = {
+      common: { hp: 80, speed: 1.8, color: '#4a7c59', size: 18, name: 'Comum' },
+      runner: { hp: 50, speed: 3.2, color: '#8e44ad', size: 15, name: 'Corredor' },
+      tank:   { hp: 250, speed: 1.0, color: '#2c3e50', size: 28, name: 'Tanque' },
+      toxic:  { hp: 100, speed: 2.0, color: '#2ecc71', size: 20, name: 'Tóxico' }
+    };
+
+    class Zombie {
+      constructor(x, y, typeKey = 'common') {
+        this.x = x;
+        this.y = y;
+        const type = ZOMBIE_TYPES[typeKey];
+        this.typeKey = typeKey;
+        this.hp = type.hp;
+        this.maxHp = type.hp;
+        this.speed = type.speed;
+        this.color = type.color;
+        this.radius = type.size;
+        this.angle = 0;
+        this.alerted = false;
+        this.targetX = x;
+        this.targetY = y;
+      }
+
+      update() {
+        const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+
+        // Visão ou Audição
+        if (distToPlayer < 250) this.alerted = true;
+
+        if (this.alerted) {
+          this.targetX = player.x;
+          this.targetY = player.y;
+        }
+
+        const dx = this.targetX - this.x;
+        const dy = this.targetY - this.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist > 5) {
+          this.angle = Math.atan2(dy, dx);
+          this.x += (dx / dist) * this.speed;
+          this.y += (dy / dist) * this.speed;
+        }
+
+        // Ataque ao Jogador
+        if (distToPlayer < this.radius + player.radius) {
+          player.hp -= 0.3;
+          triggerHitEffect();
+          updateHUD();
+          if (player.hp <= 0) alert("VOCÊ MORREU! Recarregue a página para tentar novamente.");
+        }
+      }
+
+      takeDamage(dmg) {
+        this.hp -= dmg;
+        this.alerted = true;
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+
+        // Corpo
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#111';
+        ctx.stroke();
+
+        // Olhos Vermelhos
+        ctx.fillStyle = '#e74c3c';
+        ctx.beginPath();
+        ctx.arc(this.radius * 0.5, -this.radius * 0.3, 3, 0, Math.PI * 2);
+        ctx.arc(this.radius * 0.5, this.radius * 0.3, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Braços do Zumbi esticados pra frente
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.radius * 0.4, -this.radius * 0.8, 12, 5);
+        ctx.fillRect(this.radius * 0.4, this.radius * 0.4, 12, 5);
+
+        ctx.restore();
+      }
+    }
+
+    function spawnZombies() {
+      const types = ['common', 'common', 'runner', 'tank', 'toxic'];
+      for (let i = 0; i < 40; i++) {
+        const rx = Math.random() * MAP_PIXEL_SIZE;
+        const ry = Math.random() * MAP_PIXEL_SIZE;
+        if (Math.hypot(rx - player.x, ry - player.y) > 400) {
+          const type = types[Math.floor(Math.random() * types.length)];
+          zombies.push(new Zombie(rx, ry, type));
+        }
+      }
+    }
+    spawnZombies();
+
+    function notifyZombiesNoise(x, y, radius) {
+      zombies.forEach(z => {
+        if (Math.hypot(z.x - x, z.y - y) < radius) {
+          z.alerted = true;
+        }
+      });
+    }
+
+    // --- PARTÍCULAS E EFEITOS ---
+    const particles = [];
+    function createBloodParticles(x, y) {
+      for (let i = 0; i < 6; i++) {
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 4,
+          vy: (Math.random() - 0.5) * 4,
+          life: 15,
+          color: '#c0392b',
+          size: Math.random() * 4 + 2
+        });
+      }
+    }
+
+    function createMuzzleFlash(x, y, angle) {
+      const fx = x + Math.cos(angle) * 35;
+      const fy = y + Math.sin(angle) * 35;
+      particles.push({
+        x: fx, y: fy, vx: 0, vy: 0, life: 3, color: '#f1c40f', size: 14
+      });
+    }
+
+    // --- RENDERIZAÇÃO DO PERSONAGEM E MÃOS VISÍVEIS ---
+    function drawPlayer() {
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      ctx.rotate(player.angle);
+
+      // Corpo Principal estilo "Undertale Top-Down"
+      ctx.fillStyle = '#2980b9';
+      ctx.beginPath();
+      ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#1a252f';
+      ctx.stroke();
+
+      // Cabelo / Cabeça
+      ctx.fillStyle = '#f39c12';
+      ctx.beginPath();
+      ctx.arc(-2, 0, player.radius * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // --- MÃOS E ARMA VISÍVEIS ---
+      const activeItem = player.inventory[player.activeSlot];
+      const recoil = player.recoilOffset;
+
+      if (activeItem) {
+        ctx.fillStyle = '#f1c40f'; // Cor da mão/pele
+
+        if (activeItem.type === 'gun') {
+          // Braços segurando arma
+          ctx.fillRect(5 - recoil, -10, 15, 5);
+          ctx.fillRect(5 - recoil, 5, 15, 5);
+
+          // Arma
+          ctx.fillStyle = '#34495e';
+          ctx.fillRect(15 - recoil, -4, 20, 8); // Cano da Arma
+        } else if (activeItem.type === 'melee') {
+          // Animação de golpe de espada/machado
+          const swingAngle = player.handAnim ? 0.8 : 0;
+          ctx.rotate(swingAngle);
+
+          // Mão
+          ctx.fillRect(12, 5, 8, 8);
+
+          // Lâmina / Ferramenta
+          ctx.fillStyle = '#bdc3c7';
+          ctx.fillRect(18, 2, 28, 6);
+        } else if (activeItem.type === 'heal') {
+          // Mãos segurando medkit
+          ctx.fillRect(10, -8, 10, 16);
+          ctx.fillStyle = '#e74c3c';
+          ctx.fillRect(14, -5, 8, 10);
+        }
+      } else {
+        // Sem item na mão
+        ctx.fillStyle = '#f1c40f';
+        ctx.beginPath();
+        ctx.arc(12, -10, 5, 0, Math.PI * 2);
+        ctx.arc(12, 10, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    // --- RENDERIZAÇÃO DO CENÁRIO DA CIDADE ---
+    function drawMap() {
+      const startTileX = Math.max(0, Math.floor((player.x - canvas.width / 2) / TILE_SIZE));
+      const endTileX = Math.min(MAP_SIZE, Math.ceil((player.x + canvas.width / 2) / TILE_SIZE));
+      const startTileY = Math.max(0, Math.floor((player.y - canvas.height / 2) / TILE_SIZE));
+      const endTileY = Math.min(MAP_SIZE, Math.ceil((player.y + canvas.height / 2) / TILE_SIZE));
+
+      for (let x = startTileX; x < endTileX; x++) {
+        for (let y = startTileY; y < endTileY; y++) {
+          const tile = mapTiles[x][y];
+          const px = x * TILE_SIZE;
+          const py = y * TILE_SIZE;
+
+          if (tile.type === 'road') {
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            // Linhas amarelas no asfalto quebradas
+            if (x % 2 === 0 && y % 2 === 0) {
+              ctx.fillStyle = '#f1c40f';
+              ctx.fillRect(px + 28, py + 20, 8, 24);
+            }
+          } else if (tile.type === 'sidewalk') {
+            ctx.fillStyle = '#7f8c8d';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            ctx.strokeStyle = '#95a5a6';
+            ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+          } else {
+            ctx.fillStyle = '#27ae60'; // Grama crescendo no abandono
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+          }
+        }
+      }
+
+      // Desenhar Prédios
+      buildings.forEach(b => {
+        ctx.fillStyle = '#34495e';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeStyle = '#1a252f';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+        // Identificação do prédio
+        ctx.fillStyle = '#ecf0f1';
+        ctx.font = 'bold 16px Courier New';
+        ctx.fillText(b.type.toUpperCase(), b.x + 20, b.y + 40);
+      });
+
+      // Detalhes ambientais (Carros e Postes)
+      mapDecorations.forEach(d => {
+        if (d.type === 'car') {
+          ctx.fillStyle = '#c0392b';
+          ctx.fillRect(d.x - 20, d.y - 12, 40, 24);
+          ctx.fillStyle = '#2c3e50';
+          ctx.fillRect(d.x - 10, d.y - 10, 20, 20); // Teto
+        } else if (d.type === 'post') {
+          ctx.fillStyle = '#f39c12';
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    }
+
+    // --- LOOP PRINCIPAL DO JOGO ---
+    function gameLoop() {
+      // Atualizar Estado
+      player.update();
+
+      // Atualizar Projéteis
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        bullets[i].update();
+        if (bullets[i].life <= 0) bullets.splice(i, 1);
+      }
+
+      // Atualizar Zumbis
+      for (let i = zombies.length - 1; i >= 0; i--) {
+        zombies[i].update();
+        if (zombies[i].hp <= 0) {
+          zombies.splice(i, 1);
+        }
+      }
+
+      // Coordenadas do mouse no mundo
+      mouse.worldX = mouse.x + (player.x - canvas.width / 2);
+      mouse.worldY = mouse.y + (player.y - canvas.height / 2);
+
+      // Limpar Canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Desenhar com Câmera Centralizada no Jogador
+      ctx.save();
+      ctx.translate(canvas.width / 2 - player.x, canvas.height / 2 - player.y);
+
+      drawMap();
+
+      // Renderizar Partículas
+      particles.forEach((p, index) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        if (p.life <= 0) particles.splice(index, 1);
+      });
+
+      // Desenhar Projéteis
+      bullets.forEach(b => b.draw());
+
+      // Desenhar Zumbis
+      zombies.forEach(z => z.draw());
+
+      // Desenhar Jogador
+      drawPlayer();
+
+      ctx.restore();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // --- INTERFACE DO USUÁRIO (HUD & HOTBAR) ---
+    function updateHUD() {
+      document.getElementById('hp-bar').style.width = (player.hp / player.maxHp * 100) + '%';
+      document.getElementById('hunger-bar').style.width = player.hunger + '%';
+      document.getElementById('thirst-bar').style.width = player.thirst + '%';
+      document.getElementById('armor-bar').style.width = player.armor + '%';
+
+      const activeItem = player.inventory[player.activeSlot];
+      const ammoElem = document.getElementById('ammo-display');
+      if (activeItem && activeItem.type === 'gun') {
+        ammoElem.style.display = 'block';
+        document.getElementById('ammo-count').innerText = `${activeItem.ammo}/${activeItem.maxAmmo}`;
+      } else {
+        ammoElem.style.display = 'none';
+      }
+    }
+
+    function createHotbarUI() {
+      const container = document.getElementById('hotbar');
+      container.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        const item = player.inventory[i];
+        const slot = document.createElement('div');
+        slot.className = `hotbar-slot ${i === player.activeSlot ? 'active' : ''}`;
+        slot.innerHTML = `
+          <span class="slot-key">${i + 1}</span>
+          <span class="slot-icon">${item ? item.icon : ''}</span>
+          <span class="slot-ammo">${item && item.count ? item.count : ''}</span>
+        `;
+        container.appendChild(slot);
+      }
+    }
+
+    function updateHotbarUI() {
+      const slots = document.querySelectorAll('.hotbar-slot');
+      slots.forEach((slot, index) => {
+        if (index === player.activeSlot) slot.classList.add('active');
+        else slot.classList.remove('active');
+      });
+      updateHUD();
+    }
+
+    function triggerHitEffect() {
+      const overlay = document.getElementById('damage-overlay');
+      overlay.classList.add('hit');
+      setTimeout(() => overlay.classList.remove('hit'), 150);
+    }
+
+    // Inicialização da UI e Loop
+    createHotbarUI();
+    updateHUD();
+    gameLoop();
+  </script>
+</body>
+</html>
